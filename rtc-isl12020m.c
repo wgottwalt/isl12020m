@@ -51,15 +51,15 @@
 #define ISL_REG_CSR_INT		0x08
 #define ISL_REG_CSR_BETA	0x0D
 
+#define ISL_REG_TEMP_TKOL	0x28 /* bit 0-7 = lower part of 10bit temperature */
+#define ISL_REG_TEMP_TKOM	0x29 /* bit 0-1 = upper part of 10bit temperature */
+
 /* ISL12020M bits  */
 #define ISL_BIT_RTC_HR_MIL	(1 << 7)
 
 #define ISL_BIT_CSR_SR_OSCF	BIT(7)
 #define ISL_BIT_CSR_INT_WRTC	(1 << 6)
-#define ISL_REG_CSR_BETA_TSE	BIT(7)
-
-#define ISL_REG_TEMP_TKOL	0x28 /* bit 0-7 = lower part of 10bit temperature */
-#define ISL_REG_TEMP_TKOM	0x29 /* bit 0-1 = upper part of 10bit temperature */
+#define ISL_BIT_CSR_BETA_TSE	BIT(7)
 
 struct isl12020m_data {
 	struct i2c_client *client;
@@ -77,7 +77,7 @@ static int isl12020m_tse(struct isl12020m_data *priv, bool enable)
 
 	err = regmap_read(priv->regmap, ISL_REG_CSR_BETA, &val);
 	if (err == 0) {
-		val = enable ? (val | ISL_REG_CSR_BETA_TSE) : (val & ~ISL_REG_CSR_BETA_TSE);
+		val = enable ? (val | ISL_BIT_CSR_BETA_TSE) : (val & ~ISL_BIT_CSR_BETA_TSE);
 
 		err = regmap_write(priv->regmap, ISL_REG_CSR_BETA, val);
 		if (!err) {
