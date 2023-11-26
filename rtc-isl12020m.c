@@ -58,6 +58,7 @@
 #define ISL_BIT_RTC_HR_MIL	(1 << 7)
 
 #define ISL_BIT_CSR_SR_OSCF	BIT(7)
+#define ISL_BIT_CSR_SR_RTCF	BIT(0)
 #define ISL_BIT_CSR_INT_WRTC	(1 << 6)
 #define ISL_BIT_CSR_BETA_TSE	BIT(7)
 
@@ -343,6 +344,8 @@ static int isl12020m_probe(struct i2c_client *client)
 	}
 	if (initial_state & ISL_BIT_CSR_SR_OSCF)
 		dev_warn(&client->dev, "oscillator failure detected\n");
+	if (initial_state & ISL_BIT_CSR_SR_RTCF)
+		dev_warn(&client->dev, "RTC power failure detected\n");
 
 	/* setup of hwmon failing is not critical */
 	priv->hwmon_dev = hwmon_device_register_with_info(&client->dev, INTERNAL_NAME, priv,
