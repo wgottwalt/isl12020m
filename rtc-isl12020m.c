@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * rtc-isl12020m.c - Renesas ISL12020M RTC I2C driver
- * Copyright (C) 2023 Wilken Gottwalt <wilken.gottwalt@jenoptik.com>
+ * Copyright (C) 2023 Wilken Gottwalt <wilken.gottwalt@posteo.net>
  */
 
 #include <linux/bcd.h>
+#include <linux/bits.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
@@ -16,12 +17,16 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 
-#define INTERNAL_NAME	"isl12020m"
-#define DRIVER_NAME	"rtc-"INTERNAL_NAME
+#define INTERNAL_NAME		"isl12020m"
+#define DRIVER_NAME		"rtc-"INTERNAL_NAME
+
+#define MASK3BITS		GENMASK(2, 0)
+#define MASK5BITS		GENMASK(4, 0)
+#define MASK6BITS		GENMASK(5, 0)
+#define MASK7BITS		GENMASK(6, 0)
 
 #define CENTURY_LEN		100
 #define MONTH_OFFSET		1
-#define WEEK_LEN		7
 
 /* ISL12020M register offsets */
 #define ISL_REG_RTC_SC		0x00 /* bit 0-6 = seconds 0-59, default 0x00 */
@@ -57,13 +62,13 @@ static int isl12020m_rtc_ops_read_time(struct device *dev, struct rtc_time *tm)
 	if (err < 0)
 		return err;
 
-	tm->tm_sec = bcd2bin(regmap_buf[ISL_REG_RTC_SC] & 0x7F);
-	tm->tm_min = bcd2bin(regmap_buf[ISL_REG_RTC_MN] & 0x7F);
-	tm->tm_hour = bcd2bin(regmap_buf[ISL_REG_RTC_HR] & 0x3F);
-	tm->tm_mday = bcd2bin(regmap_buf[ISL_REG_RTC_DT] & 0x3F);
-	tm->tm_mon = bcd2bin(regmap_buf[ISL_REG_RTC_MO] & 0x1F) - MONTH_OFFSET;
+	tm->tm_sec = bcd2bin(regmap_buf[ISL_REG_RTC_SC] & MASK7BITS);
+	tm->tm_min = bcd2bin(regmap_buf[ISL_REG_RTC_MN] & MASK7BITS);
+	tm->tm_hour = bcd2bin(regmap_buf[ISL_REG_RTC_HR] & MASK6BITS);
+	tm->tm_mday = bcd2bin(regmap_buf[ISL_REG_RTC_DT] & MASK6BITS);
+	tm->tm_mon = bcd2bin(regmap_buf[ISL_REG_RTC_MO] & MASK5BITS) - MONTH_OFFSET;
 	tm->tm_year = bcd2bin(regmap_buf[ISL_REG_RTC_YR]) + CENTURY_LEN;
-	tm->tm_wday = regmap_buf[ISL_REG_RTC_DW] & WEEK_LEN;
+	tm->tm_wday = regmap_buf[ISL_REG_RTC_DW] & MASK3BITS;
 
 	return 0;
 }
@@ -86,7 +91,7 @@ static int isl12020m_rtc_ops_set_time(struct device *dev, struct rtc_time *tm)
 	regmap_buf[ISL_REG_RTC_DT] = bin2bcd(tm->tm_mday);
 	regmap_buf[ISL_REG_RTC_MO] = bin2bcd(tm->tm_mon + MONTH_OFFSET);
 	regmap_buf[ISL_REG_RTC_YR] = bin2bcd(tm->tm_year % CENTURY_LEN);
-	regmap_buf[ISL_REG_RTC_DW] = tm->tm_wday & WEEK_LEN;
+	regmap_buf[ISL_REG_RTC_DW] = tm->tm_wday & MASK3BITS;
 
 	return regmap_bulk_write(priv->regmap, ISL_REG_RTC_SC, regmap_buf, sizeof(regmap_buf));
 }
@@ -127,7 +132,7 @@ static int isl12020m_probe(struct i2c_client *client)
 	priv->rtc = devm_rtc_allocate_device(&client->dev);
 	if (IS_ERR(priv->rtc)) {
 		err = PTR_ERR(priv->rtc);
-		dev_err(&client->dev, "allocating rtc structure failed (%d)\n", err);
+		dev_err(&client->dev, "allocating rtc device failed (%d)\n", err);
 		return err;
 	}
 
