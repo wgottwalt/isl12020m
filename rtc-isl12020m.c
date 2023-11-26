@@ -49,6 +49,7 @@
 
 #define ISL_REG_CSR_SR		0x07
 #define ISL_REG_CSR_INT		0x08
+#define ISL_REG_CSR_PWRVDD	0x09
 #define ISL_REG_CSR_BETA	0x0D
 
 #define ISL_REG_TEMP_TKOL	0x28 /* bit 0-7 = lower part of 10bit temperature */
@@ -222,7 +223,7 @@ static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *
 
 static struct device_attribute isl12020m_tse_dev_attr = {
         .attr = {
-                .name = "temperatur_sensing_enable",
+                .name = "temperature_sensor_enabled",
                 .mode = S_IWUSR | S_IRUGO,
         },
         .show = isl12020m_tse_show,
@@ -355,7 +356,7 @@ static int isl12020m_probe(struct i2c_client *client)
 			 PTR_ERR(priv->hwmon_dev));
 	}
 
-	if (device_property_present(&client->dev, "temp-sensing-enable"))
+	if (device_property_present(&client->dev, "temperature-sensor-enabled"))
 		isl12020m_tse(priv, true);
 
 	return devm_rtc_register_device(priv->rtc);
