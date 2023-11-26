@@ -65,24 +65,23 @@ struct isl12020m_data {
 
 static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 {
-	struct regmap *regmap = priv->regmap;
-	int ret = 0;
+	int err = 0;
 	__le16 buf;
 
-	ret = regmap_bulk_read(regmap, ISL_REG_TEMP_TKOL, &buf, sizeof(buf));
-	if (ret == 0) {
+	err = regmap_bulk_read(priv->regmap, ISL_REG_TEMP_TKOL, &buf, sizeof(buf));
+	if (err == 0) {
 		*val = le16_to_cpu(buf);
 		*val *= MILLI_DEGREE_CELCIUS / 2;
 		*val -= CELCIUS0;
 	}
 
-	return ret;
+	return err;
 }
 
 static umode_t isl12020m_hwmon_temp_is_visible(const struct isl12020m_data *priv, u32 attr,
 					       int channel)
 {
-	umode_t ret = 0444;
+	umode_t err = 0444;
 
 	switch (attr) {
 	case hwmon_temp_input:
@@ -91,22 +90,22 @@ static umode_t isl12020m_hwmon_temp_is_visible(const struct isl12020m_data *priv
 	case hwmon_temp_max:
 	case hwmon_temp_crit:
 		if (channel > 0)
-			ret = 0;
+			err = 0;
 		break;
 	default:
 		break;
 	}
 
-	return ret;
+	return err;
 }
 
 static int isl12020m_hwmon_temp_read(struct isl12020m_data *priv, u32 attr, int channel, long *val)
 {
-	int ret = 0;
+	int err = 0;
 
 	switch (attr) {
 	case hwmon_temp_input:
-		ret = isl12020m_read_temp(priv, val);
+		err = isl12020m_read_temp(priv, val);
 		break;
 	case hwmon_temp_lcrit:
 		*val = TEMP_LCRIT;
@@ -121,10 +120,10 @@ static int isl12020m_hwmon_temp_read(struct isl12020m_data *priv, u32 attr, int 
 		*val = TEMP_CRIT;
 		break;
 	default:
-		ret = -EOPNOTSUPP;
+		err = -EOPNOTSUPP;
 	}
 
-	return ret;
+	return err;
 }
 
 static umode_t isl12020m_hwmon_ops_is_visible(const void *data, enum hwmon_sensor_types type,
