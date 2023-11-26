@@ -47,11 +47,13 @@
 
 #define ISL_REG_CSR_SR		0x07
 #define ISL_REG_CSR_INT		0x08
+#define ISL_REG_CSR_BETA	0x0D
 
 /* ISL12020M bits  */
 #define ISL_BIT_RTC_HR_MIL	(1 << 7)
 
 #define ISL_BIT_CSR_INT_WRTC	(1 << 6)
+#define ISL_REG_CSR_BETA_TSE	BIT(7)
 
 #define ISL_REG_TEMP_TKOL	0x28 /* bit 0-7 = lower part of 10bit temperature */
 #define ISL_REG_TEMP_TKOM	0x29 /* bit 0-1 = upper part of 10bit temperature */
@@ -61,18 +63,45 @@ struct isl12020m_data {
 	struct rtc_device *rtc;
 	struct regmap *regmap;
 	struct device *hwmon_dev;
+	bool tse;
 };
+
+static int isl12020m_tse(struct isl12020m_data *priv, bool enable)
+{
+	int val;
+	int err;
+
+	err = regmap_read(priv->regmap, ISL_REG_CSR_BETA, &val);
+	if (err == 0) {
+		val = enable ? (val | ISL_REG_CSR_BETA_TSE) : (val & ~ISL_REG_CSR_BETA_TSE);
+
+		err = regmap_write(priv->regmap, ISL_REG_CSR_BETA, val);
+		if (!err) {
+			priv->tse = enable;
+		} else {
+			dev_warn(&priv->client->dev, "TSE register writing failed (%d)\n", err);
+		}
+	} else {
+		dev_warn(&priv->client->dev, "TSE register reading failed (%d)\n", err);
+	}
+
+	return err;
+}
 
 static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 {
 	int err = 0;
 	__le16 buf;
 
-	err = regmap_bulk_read(priv->regmap, ISL_REG_TEMP_TKOL, &buf, sizeof(buf));
-	if (err == 0) {
-		*val = le16_to_cpu(buf);
-		*val *= MILLI_DEGREE_CELCIUS / 2;
-		*val -= CELCIUS0;
+	if (priv->tse) {
+		err = regmap_bulk_read(priv->regmap, ISL_REG_TEMP_TKOL, &buf, sizeof(buf));
+		if (err == 0) {
+			*val = le16_to_cpu(buf);
+			*val *= MILLI_DEGREE_CELCIUS / 2;
+			*val -= CELCIUS0;
+		}
+	} else {
+		err = -EOPNOTSUPP;
 	}
 
 	return err;
@@ -252,6 +281,9 @@ static int isl12020m_probe(struct i2c_client *client)
 	priv->rtc->ops = &isl12020m_rtc_ops;
 	priv->rtc->range_min = RTC_TIMESTAMP_BEGIN_2000;
 	priv->rtc->range_max = RTC_TIMESTAMP_END_2099;
+
+	if (device_property_present(&client->dev, "temp-sensing-enable"))
+		isl12020m_tse(priv, true);
 
 	/* setup of hwmon failing is not critical */
 	priv->hwmon_dev = hwmon_device_register_with_info(&client->dev, INTERNAL_NAME, priv,
