@@ -10,12 +10,14 @@
 #include <linux/hwmon.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
+#include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/regmap.h>
 #include <linux/rtc.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/types.h>
 
 #define INTERNAL_NAME		"isl12020m"
@@ -52,6 +54,7 @@
 /* ISL12020M bits  */
 #define ISL_BIT_RTC_HR_MIL	(1 << 7)
 
+#define ISL_BIT_CSR_SR_OSCF	BIT(7)
 #define ISL_BIT_CSR_INT_WRTC	(1 << 6)
 #define ISL_REG_CSR_BETA_TSE	BIT(7)
 
@@ -63,6 +66,7 @@ struct isl12020m_data {
 	struct rtc_device *rtc;
 	struct regmap *regmap;
 	struct device *hwmon_dev;
+	struct kobject *sysfs_kobj;
 	bool tse;
 };
 
@@ -193,6 +197,42 @@ static const struct hwmon_chip_info isl12020m_chip_info = {
 	.info = isl12020m_info,
 };
 
+static ssize_t isl12020m_tse_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%c\n", priv->tse ? '1' : '0');
+}
+
+static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *attr,
+				   const char *buf, size_t count)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	u8 val;
+
+	sscanf(buf, "%hhu", &val);
+	if (val)
+		isl12020m_tse(priv, true);
+	else
+		isl12020m_tse(priv, false);
+
+	return count;
+}
+
+static struct device_attribute isl12020m_tse_dev_attr = {
+        .attr = {
+                .name = "temperatur_sensing_enable",
+                .mode = S_IWUSR | S_IRUGO,
+        },
+        .show = isl12020m_tse_show,
+	.store = isl12020m_tse_store,
+};
+
+static const struct attribute *isl12020m_attrs[] = {
+	&isl12020m_tse_dev_attr.attr,
+	NULL,
+};
+
 static int isl12020m_rtc_ops_read_time(struct device *dev, struct rtc_time *tm)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
@@ -252,6 +292,7 @@ static const struct regmap_config isl12020m_regmap_config = {
 static int isl12020m_probe(struct i2c_client *client)
 {
 	struct isl12020m_data *priv;
+	int initial_state;
 	int err;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
@@ -282,8 +323,26 @@ static int isl12020m_probe(struct i2c_client *client)
 	priv->rtc->range_min = RTC_TIMESTAMP_BEGIN_2000;
 	priv->rtc->range_max = RTC_TIMESTAMP_END_2099;
 
-	if (device_property_present(&client->dev, "temp-sensing-enable"))
-		isl12020m_tse(priv, true);
+	/* sysfs is required and should not fail */
+	priv->sysfs_kobj = kobject_create_and_add(INTERNAL_NAME, &client->dev.kobj);
+	if (IS_ERR(priv->sysfs_kobj)) {
+		dev_err(&client->dev, "setup of sysfs failed (%ld)\n", PTR_ERR(priv->sysfs_kobj));
+		goto sysfs_fail;
+	}
+	err = sysfs_create_files(priv->sysfs_kobj, isl12020m_attrs);
+	if (err) {
+		pr_err("failed to create sysfs entries (%d)\n", err);
+		goto entries_fail;
+	}
+
+	/* get initial state of the rtc and check for failures, this is critical */
+	err = regmap_read(priv->regmap, ISL_REG_CSR_SR, &initial_state);
+	if (err) {
+		dev_err(&client->dev, "failed to acquire initial status (%d)\n", err);
+		goto state_fail;
+	}
+	if (initial_state & ISL_BIT_CSR_SR_OSCF)
+		dev_warn(&client->dev, "oscillator failure detected\n");
 
 	/* setup of hwmon failing is not critical */
 	priv->hwmon_dev = hwmon_device_register_with_info(&client->dev, INTERNAL_NAME, priv,
@@ -293,15 +352,26 @@ static int isl12020m_probe(struct i2c_client *client)
 			 PTR_ERR(priv->hwmon_dev));
 	}
 
+	if (device_property_present(&client->dev, "temp-sensing-enable"))
+		isl12020m_tse(priv, true);
+
 	return devm_rtc_register_device(priv->rtc);
+
+state_fail:
+	sysfs_remove_files(priv->sysfs_kobj, isl12020m_attrs);
+entries_fail:
+	kobject_put(priv->sysfs_kobj);
+sysfs_fail:
+	return err;
 }
 
 static void isl12020m_remove(struct i2c_client *client)
 {
 	struct isl12020m_data *priv = i2c_get_clientdata(client);
 
+	sysfs_remove_files(priv->sysfs_kobj, isl12020m_attrs);
+	kobject_put(priv->sysfs_kobj);
 	hwmon_device_unregister(priv->hwmon_dev);
-	// TODO: sysfs, etc
 }
 
 static const struct of_device_id isl12020m_of_match_table[] = {
