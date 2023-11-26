@@ -7,9 +7,9 @@ reliability scenarios.
 
 supported features:
 - basic rtc functionality
+- hwmon temperature (current, min, max, criticals)
 
 todo:
-- hwmon temperaturs
 - temperature and voltage drift correction
 - reading of failure points, category and dates/times
 - wave-gen on IRQ/F_OUT line (connect it to a GPIO, gen 1Hz and use it as PPS)

@@ -7,6 +7,7 @@
 #include <linux/bcd.h>
 #include <linux/bits.h>
 #include <linux/err.h>
+#include <linux/hwmon.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -28,6 +29,13 @@
 #define CENTURY_LEN		100
 #define MONTH_OFFSET		1
 
+#define MILLI_DEGREE_CELCIUS	1000
+#define CELCIUS0		(273 * MILLI_DEGREE_CELCIUS)
+#define TEMP_MIN		(-40 * MILLI_DEGREE_CELCIUS)
+#define TEMP_LCRIT		(-50 * MILLI_DEGREE_CELCIUS)
+#define TEMP_MAX		(85 * MILLI_DEGREE_CELCIUS)
+#define TEMP_CRIT		(90 * MILLI_DEGREE_CELCIUS)
+
 /* ISL12020M register offsets */
 #define ISL_REG_RTC_SC		0x00 /* bit 0-6 = seconds 0-59, default 0x00 */
 #define ISL_REG_RTC_MN		0x01 /* bit 0-6 = minutes 0-59, default 0x00 */
@@ -45,10 +53,116 @@
 
 #define ISL_BIT_CSR_INT_WRTC	(1 << 6)
 
+#define ISL_REG_TEMP_TKOL	0x28 /* bit 0-7 = lower part of 10bit temperature */
+#define ISL_REG_TEMP_TKOM	0x29 /* bit 0-1 = upper part of 10bit temperature */
+
 struct isl12020m_data {
 	struct i2c_client *client;
 	struct rtc_device *rtc;
 	struct regmap *regmap;
+	struct device *hwmon_dev;
+};
+
+static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
+{
+	struct regmap *regmap = priv->regmap;
+	int ret = 0;
+	__le16 buf;
+
+	ret = regmap_bulk_read(regmap, ISL_REG_TEMP_TKOL, &buf, sizeof(buf));
+	if (ret == 0) {
+		*val = le16_to_cpu(buf);
+		*val *= MILLI_DEGREE_CELCIUS / 2;
+		*val -= CELCIUS0;
+	}
+
+	return ret;
+}
+
+static umode_t isl12020m_hwmon_temp_is_visible(const struct isl12020m_data *priv, u32 attr,
+					       int channel)
+{
+	umode_t ret = 0444;
+
+	switch (attr) {
+	case hwmon_temp_input:
+	case hwmon_temp_lcrit:
+	case hwmon_temp_min:
+	case hwmon_temp_max:
+	case hwmon_temp_crit:
+		if (channel > 0)
+			ret = 0;
+		break;
+	default:
+		break;
+	}
+
+	return ret;
+}
+
+static int isl12020m_hwmon_temp_read(struct isl12020m_data *priv, u32 attr, int channel, long *val)
+{
+	int ret = 0;
+
+	switch (attr) {
+	case hwmon_temp_input:
+		ret = isl12020m_read_temp(priv, val);
+		break;
+	case hwmon_temp_lcrit:
+		*val = TEMP_LCRIT;
+		break;
+	case hwmon_temp_min:
+		*val = TEMP_MIN;
+		break;
+	case hwmon_temp_max:
+		*val = TEMP_MAX;
+		break;
+	case hwmon_temp_crit:
+		*val = TEMP_CRIT;
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+	}
+
+	return ret;
+}
+
+static umode_t isl12020m_hwmon_ops_is_visible(const void *data, enum hwmon_sensor_types type,
+					      u32 attr, int channel)
+{
+	const struct isl12020m_data *priv = data;
+
+	if (type == hwmon_temp)
+		return isl12020m_hwmon_temp_is_visible(priv, attr, channel);
+
+	return 0;
+}
+
+static int isl12020m_hwmon_ops_read(struct device *dev, enum hwmon_sensor_types type, u32 attr,
+				    int channel, long *val)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+
+	if (type == hwmon_temp)
+		return isl12020m_hwmon_temp_read(priv, attr, channel, val);
+
+	return -EOPNOTSUPP;
+}
+
+static const struct hwmon_ops isl12020m_hwmon_ops = {
+	.is_visible = isl12020m_hwmon_ops_is_visible,
+	.read = isl12020m_hwmon_ops_read,
+};
+
+static const struct hwmon_channel_info *isl12020m_info[] = {
+	HWMON_CHANNEL_INFO(temp,
+			   HWMON_T_INPUT | HWMON_T_LCRIT | HWMON_T_MIN | HWMON_T_MAX | HWMON_T_CRIT),
+	NULL,
+};
+
+static const struct hwmon_chip_info isl12020m_chip_info = {
+	.ops = &isl12020m_hwmon_ops,
+	.info = isl12020m_info,
 };
 
 static int isl12020m_rtc_ops_read_time(struct device *dev, struct rtc_time *tm)
@@ -140,12 +254,23 @@ static int isl12020m_probe(struct i2c_client *client)
 	priv->rtc->range_min = RTC_TIMESTAMP_BEGIN_2000;
 	priv->rtc->range_max = RTC_TIMESTAMP_END_2099;
 
+	/* setup of hwmon failing is not critical */
+	priv->hwmon_dev = hwmon_device_register_with_info(&client->dev, INTERNAL_NAME, priv,
+							  &isl12020m_chip_info, NULL);
+	if (IS_ERR(priv->hwmon_dev)) {
+		dev_warn(&client->dev, "registering hwmon device failed (%ld)\n",
+			 PTR_ERR(priv->hwmon_dev));
+	}
+
 	return devm_rtc_register_device(priv->rtc);
 }
 
 static void isl12020m_remove(struct i2c_client *client)
 {
-	// TODO: hwmon, sysfs, etc
+	struct isl12020m_data *priv = i2c_get_clientdata(client);
+
+	hwmon_device_unregister(priv->hwmon_dev);
+	// TODO: sysfs, etc
 }
 
 static const struct of_device_id isl12020m_of_match_table[] = {
