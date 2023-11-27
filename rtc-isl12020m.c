@@ -24,6 +24,7 @@
 #define DRIVER_NAME		"rtc-"INTERNAL_NAME
 
 #define MASK3BITS		GENMASK(2, 0)
+#define MASK4BITS		GENMASK(3, 0)
 #define MASK5BITS		GENMASK(4, 0)
 #define MASK6BITS		GENMASK(5, 0)
 #define MASK7BITS		GENMASK(6, 0)
@@ -37,6 +38,8 @@
 #define TEMP_LCRIT		(-50 * MILLI_DEGREE_CELCIUS)
 #define TEMP_MAX		(85 * MILLI_DEGREE_CELCIUS)
 #define TEMP_CRIT		(90 * MILLI_DEGREE_CELCIUS)
+
+#define FREQ_OUT_MODE_MAX	GENMASK(4, 0)
 
 /* ISL12020M register offsets */
 #define ISL_REG_RTC_SC		0x00 /* bit 0-6 = seconds 0-59, default 0x00 */
@@ -62,6 +65,7 @@
 #define ISL_BIT_CSR_SR_OSCF	BIT(7)
 #define ISL_BIT_CSR_SR_RTCF	BIT(0)
 #define ISL_BIT_CSR_INT_WRTC	BIT(6)
+#define ISL_BIT_CSR_INT_FOBATB	BIT(4)
 #define ISL_BIT_CSR_BETA_TSE	BIT(7)
 #define ISL_BIT_CSR_BETA_BTSE	BIT(6)
 #define ISL_BIT_CSR_BETA_BTSR	BIT(5)
@@ -71,6 +75,8 @@ struct isl12020m_data {
 	struct rtc_device *rtc;
 	struct regmap *regmap;
 	struct device *hwmon_dev;
+	u8 freq_out_mode;
+	bool freq_out;
 	bool oscf;
 	bool rtcf;
 	bool tse;
@@ -347,6 +353,31 @@ static const struct attribute *isl12020m_attrs[] = {
 	NULL,
 };
 
+static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool enable)
+{
+	int val;
+	int err = 0;
+
+	err = regmap_read(priv->regmap, ISL_REG_CSR_INT, &val);
+	if (!err) {
+		val = enable ? (val | ISL_BIT_CSR_INT_FOBATB) : (val & ~ISL_BIT_CSR_INT_FOBATB);
+		val &= ~MASK4BITS;
+		val |= mode & MASK4BITS;
+
+		err = regmap_write(priv->regmap, ISL_REG_CSR_INT, val);
+		if (!err) {
+			priv->freq_out_mode = mode;
+			priv->freq_out = enable;
+		} else {
+			dev_warn(&priv->client->dev, "INT register writing failed (%d)\n", err);
+		}
+	} else {
+		dev_warn(&priv->client->dev, "INT register reading failed (%d)\n", err);
+	}
+
+	return err;
+}
+
 static int isl12020m_rtc_ops_read_time(struct device *dev, struct rtc_time *tm)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
@@ -408,6 +439,8 @@ static int isl12020m_probe(struct i2c_client *client)
 	struct isl12020m_data *priv;
 	int initial_state;
 	int err;
+	u8 freq_out_mode = 1;
+	bool freq_out = false;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
 		return -ENODEV;
@@ -473,6 +506,16 @@ static int isl12020m_probe(struct i2c_client *client)
 		isl12020m_beta(priv, priv->tse, true, priv->btsr);
 	if (device_property_present(&client->dev, "high-sensing-frequency"))
 		isl12020m_beta(priv, priv->tse, priv->btse, true);
+
+	/* failure of setting the frequency output support is not critical, default is off anyway */
+	if (device_property_present(&client->dev, "frequency-output-enable"))
+		freq_out = true;
+	device_property_read_u8(&client->dev, "frequency-output-mode", &freq_out_mode);
+	err = isl12020m_set_freq_out(priv, freq_out_mode, freq_out);
+	if (err) {
+		dev_warn(&client->dev, "setting frequency output failed (enable=%d, mode=%d, "
+			 " err=%d)\n", freq_out, freq_out_mode, err);
+	}
 
 	return devm_rtc_register_device(priv->rtc);
 
