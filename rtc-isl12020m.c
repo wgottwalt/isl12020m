@@ -71,6 +71,8 @@ struct isl12020m_data {
 	struct rtc_device *rtc;
 	struct regmap *regmap;
 	struct device *hwmon_dev;
+	bool oscf;
+	bool rtcf;
 	bool tse;
 	bool btse;
 	bool btsr;
@@ -107,6 +109,7 @@ static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 	int err = 0;
 	__le16 buf;
 
+	/* if BETA TSE is disabled, sensor values are bogus values -> disable temp1_input */
 	if (priv->tse) {
 		err = regmap_bulk_read(priv->regmap, ISL_REG_TEMP_TKOL, &buf, sizeof(buf));
 		if (err == 0) {
@@ -207,6 +210,38 @@ static const struct hwmon_chip_info isl12020m_chip_info = {
 	.info = isl12020m_info,
 };
 
+static ssize_t isl12020m_oscf_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%c\n", priv->oscf ? '1' : '0');
+}
+
+/* store oscillator failure for userspace checks */
+static struct device_attribute isl12020m_oscf_dev_attr = {
+	.attr = {
+		.name = "oscillator_failed",
+		.mode = S_IRUGO,
+	},
+	.show = isl12020m_oscf_show,
+};
+
+static ssize_t isl12020m_rtcf_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%c\n", priv->rtcf ? '1' : '0');
+}
+
+/* store rtc failure for userspace checks */
+static struct device_attribute isl12020m_rtcf_dev_attr = {
+	.attr = {
+		.name = "rtc_failed",
+		.mode = S_IRUGO,
+	},
+	.show = isl12020m_rtcf_show,
+};
+
 static ssize_t isl12020m_tse_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
@@ -304,6 +339,8 @@ static struct device_attribute isl12020m_btsr_dev_attr = {
 };
 
 static const struct attribute *isl12020m_attrs[] = {
+	&isl12020m_oscf_dev_attr.attr,
+	&isl12020m_rtcf_dev_attr.attr,
 	&isl12020m_tse_dev_attr.attr,
 	&isl12020m_btse_dev_attr.attr,
 	&isl12020m_btsr_dev_attr.attr,
@@ -413,10 +450,14 @@ static int isl12020m_probe(struct i2c_client *client)
 		dev_err(&client->dev, "failed to acquire initial status (%d)\n", err);
 		goto state_fail;
 	}
-	if (initial_state & ISL_BIT_CSR_SR_OSCF)
+	if (initial_state & ISL_BIT_CSR_SR_OSCF) {
+		priv->oscf = true;
 		dev_warn(&client->dev, "oscillator failure detected\n");
-	if (initial_state & ISL_BIT_CSR_SR_RTCF)
+	}
+	if (initial_state & ISL_BIT_CSR_SR_RTCF) {
+		priv->rtcf = true;
 		dev_warn(&client->dev, "RTC power failure detected\n");
+	}
 
 	/* setup of hwmon failing is not critical */
 	priv->hwmon_dev = hwmon_device_register_with_info(&client->dev, INTERNAL_NAME, priv,
@@ -436,7 +477,7 @@ static int isl12020m_probe(struct i2c_client *client)
 	return devm_rtc_register_device(priv->rtc);
 
 state_fail:
-	sysfs_remove_files(&priv->client->dev.kobj, isl12020m_attrs);
+	sysfs_remove_files(&client->dev.kobj, isl12020m_attrs);
 sysfs_fail:
 	return err;
 }
