@@ -71,7 +71,6 @@ struct isl12020m_data {
 	struct rtc_device *rtc;
 	struct regmap *regmap;
 	struct device *hwmon_dev;
-	struct kobject *sysfs_kobj;
 	bool tse;
 	bool btse;
 	bool btsr;
@@ -402,15 +401,10 @@ static int isl12020m_probe(struct i2c_client *client)
 	priv->rtc->range_max = RTC_TIMESTAMP_END_2099;
 
 	/* sysfs is required and should not fail */
-	priv->sysfs_kobj = kobject_create_and_add(INTERNAL_NAME, &client->dev.kobj);
-	if (IS_ERR(priv->sysfs_kobj)) {
-		dev_err(&client->dev, "setup of sysfs failed (%ld)\n", PTR_ERR(priv->sysfs_kobj));
-		goto sysfs_fail;
-	}
-	err = sysfs_create_files(priv->sysfs_kobj, isl12020m_attrs);
+	err = sysfs_create_files(&client->dev.kobj, isl12020m_attrs);
 	if (err) {
 		pr_err("failed to create sysfs entries (%d)\n", err);
-		goto entries_fail;
+		goto sysfs_fail;
 	}
 
 	/* get initial state of the rtc and check for failures, this is critical */
@@ -442,9 +436,7 @@ static int isl12020m_probe(struct i2c_client *client)
 	return devm_rtc_register_device(priv->rtc);
 
 state_fail:
-	sysfs_remove_files(priv->sysfs_kobj, isl12020m_attrs);
-entries_fail:
-	kobject_put(priv->sysfs_kobj);
+	sysfs_remove_files(&priv->client->dev.kobj, isl12020m_attrs);
 sysfs_fail:
 	return err;
 }
@@ -453,8 +445,7 @@ static void isl12020m_remove(struct i2c_client *client)
 {
 	struct isl12020m_data *priv = i2c_get_clientdata(client);
 
-	sysfs_remove_files(priv->sysfs_kobj, isl12020m_attrs);
-	kobject_put(priv->sysfs_kobj);
+	sysfs_remove_files(&client->dev.kobj, isl12020m_attrs);
 	hwmon_device_unregister(priv->hwmon_dev);
 }
 
