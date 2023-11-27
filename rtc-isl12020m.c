@@ -50,6 +50,7 @@
 #define ISL_REG_CSR_SR		0x07
 #define ISL_REG_CSR_INT		0x08
 #define ISL_REG_CSR_PWRVDD	0x09
+#define ISL_REG_CSR_PWRBAT	0x0A
 #define ISL_REG_CSR_BETA	0x0D
 
 #define ISL_REG_TEMP_TKOL	0x28 /* bit 0-7 = lower part of 10bit temperature */
@@ -62,6 +63,8 @@
 #define ISL_BIT_CSR_SR_RTCF	BIT(0)
 #define ISL_BIT_CSR_INT_WRTC	(1 << 6)
 #define ISL_BIT_CSR_BETA_TSE	BIT(7)
+#define ISL_BIT_CSR_BETA_BTSE	BIT(6)
+#define ISL_BIT_CSR_BETA_BTSR	BIT(5)
 
 struct isl12020m_data {
 	struct i2c_client *client;
@@ -70,25 +73,31 @@ struct isl12020m_data {
 	struct device *hwmon_dev;
 	struct kobject *sysfs_kobj;
 	bool tse;
+	bool btse;
+	bool btsr;
 };
 
-static int isl12020m_tse(struct isl12020m_data *priv, bool enable)
+static int isl12020m_beta(struct isl12020m_data *priv, bool tse, bool btse, bool btsr)
 {
 	int val;
 	int err;
 
 	err = regmap_read(priv->regmap, ISL_REG_CSR_BETA, &val);
 	if (err == 0) {
-		val = enable ? (val | ISL_BIT_CSR_BETA_TSE) : (val & ~ISL_BIT_CSR_BETA_TSE);
+		val = tse ? (val | ISL_BIT_CSR_BETA_TSE) : (val & ~ISL_BIT_CSR_BETA_TSE);
+		val = btse ? (val | ISL_BIT_CSR_BETA_BTSE) : (val & ~ISL_BIT_CSR_BETA_BTSE);
+		val = btsr ? (val | ISL_BIT_CSR_BETA_BTSR) : (val & ~ISL_BIT_CSR_BETA_BTSR);
 
 		err = regmap_write(priv->regmap, ISL_REG_CSR_BETA, val);
 		if (!err) {
-			priv->tse = enable;
+			priv->tse = tse;
+			priv->btse = btse;
+			priv->btsr = btsr;
 		} else {
-			dev_warn(&priv->client->dev, "TSE register writing failed (%d)\n", err);
+			dev_warn(&priv->client->dev, "BETA register writing failed (%d)\n", err);
 		}
 	} else {
-		dev_warn(&priv->client->dev, "TSE register reading failed (%d)\n", err);
+		dev_warn(&priv->client->dev, "BETA register reading failed (%d)\n", err);
 	}
 
 	return err;
@@ -214,13 +223,14 @@ static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *
 
 	sscanf(buf, "%hhu", &val);
 	if (val)
-		isl12020m_tse(priv, true);
+		isl12020m_beta(priv, true, priv->btse, priv->btsr);
 	else
-		isl12020m_tse(priv, false);
+		isl12020m_beta(priv, false, priv->btse, priv->btsr);
 
 	return count;
 }
 
+/* enable sensor usage and drift correction during normal power supply mode */
 static struct device_attribute isl12020m_tse_dev_attr = {
         .attr = {
                 .name = "temperature_sensor_enabled",
@@ -230,8 +240,74 @@ static struct device_attribute isl12020m_tse_dev_attr = {
 	.store = isl12020m_tse_store,
 };
 
+static ssize_t isl12020m_btse_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%c\n", priv->btse ? '1' : '0');
+}
+
+static ssize_t isl12020m_btse_store(struct device *dev, struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	u8 val;
+
+	sscanf(buf, "%hhu", &val);
+	if (val)
+		isl12020m_beta(priv, priv->tse, true, priv->btsr);
+	else
+		isl12020m_beta(priv, priv->tse, false, priv->btsr);
+
+	return count;
+}
+
+/* enable sensor usage and drift correction during battery mode */
+static struct device_attribute isl12020m_btse_dev_attr = {
+	.attr = {
+		.name = "battery_temperature_sensor_enabled",
+		.mode = S_IWUSR | S_IRUGO,
+	},
+	.show = isl12020m_btse_show,
+	.store = isl12020m_btse_store,
+};
+
+static ssize_t isl12020m_btsr_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%c\n", priv->btsr ? '1' : '0');
+}
+
+static ssize_t isl12020m_btsr_store(struct device *dev, struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	u8 val;
+
+	sscanf(buf, "%hhu", &val);
+	if (val)
+		isl12020m_beta(priv, priv->tse, priv->btse, true);
+	else
+		isl12020m_beta(priv, priv->tse, priv->btse, false);
+
+	return count;
+}
+
+/* switch sensing frequency from 10 minutes to 1 minute */
+static struct device_attribute isl12020m_btsr_dev_attr = {
+	.attr = {
+		.name = "high-sensing-frequency",
+		.mode = S_IWUSR | S_IRUGO,
+	},
+	.show = isl12020m_btsr_show,
+	.store = isl12020m_btsr_store,
+};
+
 static const struct attribute *isl12020m_attrs[] = {
 	&isl12020m_tse_dev_attr.attr,
+	&isl12020m_btse_dev_attr.attr,
+	&isl12020m_btsr_dev_attr.attr,
 	NULL,
 };
 
@@ -357,7 +433,11 @@ static int isl12020m_probe(struct i2c_client *client)
 	}
 
 	if (device_property_present(&client->dev, "temperature-sensor-enabled"))
-		isl12020m_tse(priv, true);
+		isl12020m_beta(priv, true, priv->btse, priv->btsr);
+	if (device_property_present(&client->dev, "battery-temperature-sensor-enabled"))
+		isl12020m_beta(priv, priv->tse, true, priv->btsr);
+	if (device_property_present(&client->dev, "high-sensing-frequency"))
+		isl12020m_beta(priv, priv->tse, priv->btse, true);
 
 	return devm_rtc_register_device(priv->rtc);
 
