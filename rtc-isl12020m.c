@@ -57,11 +57,11 @@
 #define ISL_REG_TEMP_TKOM	0x29 /* bit 0-1 = upper part of 10bit temperature */
 
 /* ISL12020M bits  */
-#define ISL_BIT_RTC_HR_MIL	(1 << 7)
+#define ISL_BIT_RTC_HR_MIL	BIT(7)
 
 #define ISL_BIT_CSR_SR_OSCF	BIT(7)
 #define ISL_BIT_CSR_SR_RTCF	BIT(0)
-#define ISL_BIT_CSR_INT_WRTC	(1 << 6)
+#define ISL_BIT_CSR_INT_WRTC	BIT(6)
 #define ISL_BIT_CSR_BETA_TSE	BIT(7)
 #define ISL_BIT_CSR_BETA_BTSE	BIT(6)
 #define ISL_BIT_CSR_BETA_BTSR	BIT(5)
