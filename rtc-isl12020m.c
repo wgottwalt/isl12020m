@@ -76,7 +76,7 @@ struct isl12020m_data {
 	struct regmap *regmap;
 	struct device *hwmon_dev;
 	u8 freq_out_mode;
-	bool freq_out;
+	bool freq_out_bat;
 	bool oscf;
 	bool rtcf;
 	bool tse;
@@ -110,21 +110,22 @@ static int isl12020m_beta(struct isl12020m_data *priv, bool tse, bool btse, bool
 	return err;
 }
 
-static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool enable)
+static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool enable_bat)
 {
 	int val;
 	int err = 0;
 
 	err = regmap_read(priv->regmap, ISL_REG_CSR_INT, &val);
 	if (!err) {
-		val = enable ? (val | ISL_BIT_CSR_INT_FOBATB) : (val & ~ISL_BIT_CSR_INT_FOBATB);
+		/* ISL_BIT_CSR_INT_FOBATB flag is a reversed bit */
+		val = enable_bat ? (val & ~ISL_BIT_CSR_INT_FOBATB) : (val | ISL_BIT_CSR_INT_FOBATB);
 		val &= ~MASK4BITS;
 		val |= mode & MASK4BITS;
 
 		err = regmap_write(priv->regmap, ISL_REG_CSR_INT, val);
 		if (!err) {
 			priv->freq_out_mode = mode;
-			priv->freq_out = enable;
+			priv->freq_out_bat = enable_bat;
 		} else {
 			dev_warn(&priv->client->dev, "INT register writing failed (%d)\n", err);
 		}
@@ -369,15 +370,16 @@ static struct device_attribute isl12020m_btsr_dev_attr = {
 	.store = isl12020m_btsr_store,
 };
 
-static ssize_t isl12020m_freq_out_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t isl12020m_bat_freq_out_show(struct device *dev, struct device_attribute *attr,
+					   char *buf)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%c\n", priv->freq_out ? '1' : '0');
+	return sysfs_emit(buf, "%c\n", priv->freq_out_bat ? '1' : '0');
 }
 
-static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attribute *attr,
-					const char *buf, size_t count)
+static ssize_t isl12020m_bat_freq_out_store(struct device *dev, struct device_attribute *attr,
+					    const char *buf, size_t count)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 	u8 val;
@@ -391,14 +393,14 @@ static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attrib
 	return count;
 }
 
-/* make frequency output feature runtime switchable */
-static struct device_attribute isl12020m_freq_out_dev_attr = {
+/* make battery frequency output feature runtime switchable */
+static struct device_attribute isl12020m_bat_freq_out_dev_attr = {
 	.attr = {
-		.name = "frequency_output_enabled",
+		.name = "battery_frequency_output_enabled",
 		.mode = S_IWUSR | S_IRUGO,
 	},
-	.show = isl12020m_freq_out_show,
-	.store = isl12020m_freq_out_store,
+	.show = isl12020m_bat_freq_out_show,
+	.store = isl12020m_bat_freq_out_store,
 };
 
 static const struct attribute *isl12020m_attrs[] = {
@@ -407,7 +409,7 @@ static const struct attribute *isl12020m_attrs[] = {
 	&isl12020m_tse_dev_attr.attr,
 	&isl12020m_btse_dev_attr.attr,
 	&isl12020m_btsr_dev_attr.attr,
-	&isl12020m_freq_out_dev_attr.attr,
+	&isl12020m_bat_freq_out_dev_attr.attr,
 	NULL,
 };
 
@@ -472,8 +474,8 @@ static int isl12020m_probe(struct i2c_client *client)
 	struct isl12020m_data *priv;
 	int initial_state;
 	int err;
-	u8 freq_out_mode = 1;
-	bool freq_out = false;
+	u8 freq_out_mode = 0;
+	bool freq_out_bat = false;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
 		return -ENODEV;
@@ -540,14 +542,18 @@ static int isl12020m_probe(struct i2c_client *client)
 	if (device_property_present(&client->dev, "high-sensing-frequency"))
 		isl12020m_beta(priv, priv->tse, priv->btse, true);
 
-	/* failure of setting the frequency output support is not critical, default is off anyway */
-	if (device_property_present(&client->dev, "frequency-output-enable"))
-		freq_out = true;
+	/*
+	 * failure of setting the frequency output support is not critical
+	 * set frequency output to disabled in battery and normal mode by default
+	 * which enables alarm signal support (an internal hardware switch)
+	 */
+	if (device_property_present(&client->dev, "battery-frequency-output-enable"))
+		freq_out_bat = true;
 	device_property_read_u8(&client->dev, "frequency-output-mode", &freq_out_mode);
-	err = isl12020m_set_freq_out(priv, freq_out_mode, freq_out);
+	err = isl12020m_set_freq_out(priv, freq_out_mode, freq_out_bat);
 	if (err) {
-		dev_warn(&client->dev, "setting frequency output failed (enable=%d, mode=%d, "
-			 " err=%d)\n", freq_out, freq_out_mode, err);
+		dev_warn(&client->dev, "setting frequency output failed (battery mode=%d, mode=%d,"
+			 " err=%d)\n", freq_out_bat, freq_out_mode, err);
 	}
 
 	return devm_rtc_register_device(priv->rtc);
