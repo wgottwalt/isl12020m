@@ -110,6 +110,31 @@ static int isl12020m_beta(struct isl12020m_data *priv, bool tse, bool btse, bool
 	return err;
 }
 
+static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool enable)
+{
+	int val;
+	int err = 0;
+
+	err = regmap_read(priv->regmap, ISL_REG_CSR_INT, &val);
+	if (!err) {
+		val = enable ? (val | ISL_BIT_CSR_INT_FOBATB) : (val & ~ISL_BIT_CSR_INT_FOBATB);
+		val &= ~MASK4BITS;
+		val |= mode & MASK4BITS;
+
+		err = regmap_write(priv->regmap, ISL_REG_CSR_INT, val);
+		if (!err) {
+			priv->freq_out_mode = mode;
+			priv->freq_out = enable;
+		} else {
+			dev_warn(&priv->client->dev, "INT register writing failed (%d)\n", err);
+		}
+	} else {
+		dev_warn(&priv->client->dev, "INT register reading failed (%d)\n", err);
+	}
+
+	return err;
+}
+
 static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 {
 	int err = 0;
@@ -352,31 +377,6 @@ static const struct attribute *isl12020m_attrs[] = {
 	&isl12020m_btsr_dev_attr.attr,
 	NULL,
 };
-
-static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool enable)
-{
-	int val;
-	int err = 0;
-
-	err = regmap_read(priv->regmap, ISL_REG_CSR_INT, &val);
-	if (!err) {
-		val = enable ? (val | ISL_BIT_CSR_INT_FOBATB) : (val & ~ISL_BIT_CSR_INT_FOBATB);
-		val &= ~MASK4BITS;
-		val |= mode & MASK4BITS;
-
-		err = regmap_write(priv->regmap, ISL_REG_CSR_INT, val);
-		if (!err) {
-			priv->freq_out_mode = mode;
-			priv->freq_out = enable;
-		} else {
-			dev_warn(&priv->client->dev, "INT register writing failed (%d)\n", err);
-		}
-	} else {
-		dev_warn(&priv->client->dev, "INT register reading failed (%d)\n", err);
-	}
-
-	return err;
-}
 
 static int isl12020m_rtc_ops_read_time(struct device *dev, struct rtc_time *tm)
 {
