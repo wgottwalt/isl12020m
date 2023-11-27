@@ -15,7 +15,7 @@ supported features:
 - hwmon temperature (current, min, max, criticals)
 - temperature and voltage drift correction (partly)
 - reading of failure points, category and dates/times (partly)
+- wave-gen on IRQ/F_OUT line (partly)
 
 todo:
-- wave-gen on IRQ/F_OUT line (connect it to a GPIO, gen 1Hz and use it as PPS)
 - alarm
