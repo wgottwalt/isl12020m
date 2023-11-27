@@ -39,7 +39,7 @@
 #define TEMP_MAX		(85 * MILLI_DEGREE_CELCIUS)
 #define TEMP_CRIT		(90 * MILLI_DEGREE_CELCIUS)
 
-#define FREQ_OUT_MODE_MAX	GENMASK(4, 0)
+#define FREQ_OUT_MODE_MAX	GENMASK(3, 0)
 
 /* ISL12020M register offsets */
 #define ISL_REG_RTC_SC		0x00 /* bit 0-6 = seconds 0-59, default 0x00 */
@@ -69,6 +69,11 @@
 #define ISL_BIT_CSR_BETA_TSE	BIT(7)
 #define ISL_BIT_CSR_BETA_BTSE	BIT(6)
 #define ISL_BIT_CSR_BETA_BTSR	BIT(5)
+
+static const char *const freq_out_modes[] = {
+	"off", "32768", "4096", "1024", "64", "32", "16", "8", "4", "2", "1", "1/2", "1/4", "1/8",
+	"1/16", "1/32",
+};
 
 struct isl12020m_data {
 	struct i2c_client *client;
@@ -403,6 +408,37 @@ static struct device_attribute isl12020m_bat_freq_out_dev_attr = {
 	.store = isl12020m_bat_freq_out_store,
 };
 
+static ssize_t isl12020m_freq_out_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d (%s%s)\n", priv->freq_out_mode,
+			  freq_out_modes[priv->freq_out_mode], priv->freq_out_mode ? " Hz" : "");
+}
+
+static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	u16 val;
+
+	sscanf(buf, "%hu", &val);
+	if (val <= FREQ_OUT_MODE_MAX)
+		isl12020m_set_freq_out(priv, val, priv->freq_out_bat);
+
+	return count;
+}
+
+/* make frequency output feature runtime switchable (off and predefined frequencies */
+static struct device_attribute isl12020m_freq_out_dev_attr = {
+	.attr = {
+		.name = "frequency_output",
+		.mode = S_IWUSR | S_IRUGO,
+	},
+	.show = isl12020m_freq_out_show,
+	.store = isl12020m_freq_out_store,
+};
+
 static const struct attribute *isl12020m_attrs[] = {
 	&isl12020m_oscf_dev_attr.attr,
 	&isl12020m_rtcf_dev_attr.attr,
@@ -410,6 +446,7 @@ static const struct attribute *isl12020m_attrs[] = {
 	&isl12020m_btse_dev_attr.attr,
 	&isl12020m_btsr_dev_attr.attr,
 	&isl12020m_bat_freq_out_dev_attr.attr,
+	&isl12020m_freq_out_dev_attr.attr,
 	NULL,
 };
 
