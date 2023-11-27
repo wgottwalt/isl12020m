@@ -273,10 +273,10 @@ static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *
 /* enable sensor usage and drift correction during normal power supply mode */
 static struct device_attribute isl12020m_tse_dev_attr = {
         .attr = {
-                .name = "temperature_sensor_enabled",
-                .mode = S_IWUSR | S_IRUGO,
-        },
-        .show = isl12020m_tse_show,
+		.name = "temperature_sensor_enabled",
+		.mode = S_IWUSR | S_IRUGO,
+	},
+	.show = isl12020m_tse_show,
 	.store = isl12020m_tse_store,
 };
 
@@ -337,7 +337,7 @@ static ssize_t isl12020m_btsr_store(struct device *dev, struct device_attribute 
 /* switch sensing frequency from 10 minutes to 1 minute */
 static struct device_attribute isl12020m_btsr_dev_attr = {
 	.attr = {
-		.name = "high-sensing-frequency",
+		.name = "high_sensing_frequency",
 		.mode = S_IWUSR | S_IRUGO,
 	},
 	.show = isl12020m_btsr_show,
