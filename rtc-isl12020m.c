@@ -369,12 +369,45 @@ static struct device_attribute isl12020m_btsr_dev_attr = {
 	.store = isl12020m_btsr_store,
 };
 
+static ssize_t isl12020m_freq_out_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%c\n", priv->freq_out ? '1' : '0');
+}
+
+static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	u8 val;
+
+	sscanf(buf, "%hhu", &val);
+	if (val)
+		isl12020m_set_freq_out(priv, priv->freq_out_mode, true);
+	else
+		isl12020m_set_freq_out(priv, priv->freq_out_mode, false);
+
+	return count;
+}
+
+/* make frequency output feature runtime switchable */
+static struct device_attribute isl12020m_freq_out_dev_attr = {
+	.attr = {
+		.name = "frequency_output_enabled",
+		.mode = S_IWUSR | S_IRUGO,
+	},
+	.show = isl12020m_freq_out_show,
+	.store = isl12020m_freq_out_store,
+};
+
 static const struct attribute *isl12020m_attrs[] = {
 	&isl12020m_oscf_dev_attr.attr,
 	&isl12020m_rtcf_dev_attr.attr,
 	&isl12020m_tse_dev_attr.attr,
 	&isl12020m_btse_dev_attr.attr,
 	&isl12020m_btsr_dev_attr.attr,
+	&isl12020m_freq_out_dev_attr.attr,
 	NULL,
 };
 
