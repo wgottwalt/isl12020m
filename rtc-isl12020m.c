@@ -89,7 +89,7 @@ struct isl12020m_data {
 	bool btsr;
 };
 
-static int isl12020m_beta(struct isl12020m_data *priv, bool tse, bool btse, bool btsr)
+static int isl12020m_set_beta(struct isl12020m_data *priv, bool tse, bool btse, bool btsr)
 {
 	int val;
 	int err;
@@ -118,7 +118,7 @@ static int isl12020m_beta(struct isl12020m_data *priv, bool tse, bool btse, bool
 static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool enable_bat)
 {
 	int val;
-	int err = 0;
+	int err;
 
 	err = regmap_read(priv->regmap, ISL_REG_CSR_INT, &val);
 	if (!err) {
@@ -143,7 +143,7 @@ static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool ena
 
 static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 {
-	int err = 0;
+	int err = -EOPNOTSUPP;
 	__le16 buf;
 
 	/* if BETA TSE is disabled, sensor values are bogus values -> disable temp1_input */
@@ -154,8 +154,6 @@ static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 			*val *= MILLI_DEGREE_CELCIUS / 2;
 			*val -= CELCIUS0;
 		}
-	} else {
-		err = -EOPNOTSUPP;
 	}
 
 	return err;
@@ -294,9 +292,9 @@ static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *
 
 	sscanf(buf, "%hhu", &val);
 	if (val)
-		isl12020m_beta(priv, true, priv->btse, priv->btsr);
+		isl12020m_set_beta(priv, true, priv->btse, priv->btsr);
 	else
-		isl12020m_beta(priv, false, priv->btse, priv->btsr);
+		isl12020m_set_beta(priv, false, priv->btse, priv->btsr);
 
 	return count;
 }
@@ -326,9 +324,9 @@ static ssize_t isl12020m_btse_store(struct device *dev, struct device_attribute 
 
 	sscanf(buf, "%hhu", &val);
 	if (val)
-		isl12020m_beta(priv, priv->tse, true, priv->btsr);
+		isl12020m_set_beta(priv, priv->tse, true, priv->btsr);
 	else
-		isl12020m_beta(priv, priv->tse, false, priv->btsr);
+		isl12020m_set_beta(priv, priv->tse, false, priv->btsr);
 
 	return count;
 }
@@ -358,9 +356,9 @@ static ssize_t isl12020m_btsr_store(struct device *dev, struct device_attribute 
 
 	sscanf(buf, "%hhu", &val);
 	if (val)
-		isl12020m_beta(priv, priv->tse, priv->btse, true);
+		isl12020m_set_beta(priv, priv->tse, priv->btse, true);
 	else
-		isl12020m_beta(priv, priv->tse, priv->btse, false);
+		isl12020m_set_beta(priv, priv->tse, priv->btse, false);
 
 	return count;
 }
@@ -573,11 +571,11 @@ static int isl12020m_probe(struct i2c_client *client)
 	}
 
 	if (device_property_present(&client->dev, "temperature-sensor-enabled"))
-		isl12020m_beta(priv, true, priv->btse, priv->btsr);
+		isl12020m_set_beta(priv, true, priv->btse, priv->btsr);
 	if (device_property_present(&client->dev, "battery-temperature-sensor-enabled"))
-		isl12020m_beta(priv, priv->tse, true, priv->btsr);
+		isl12020m_set_beta(priv, priv->tse, true, priv->btsr);
 	if (device_property_present(&client->dev, "high-sensing-frequency"))
-		isl12020m_beta(priv, priv->tse, priv->btse, true);
+		isl12020m_set_beta(priv, priv->tse, priv->btse, true);
 
 	/*
 	 * failure of setting the frequency output support is not critical
