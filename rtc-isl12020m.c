@@ -511,7 +511,7 @@ static int isl12020m_probe(struct i2c_client *client)
 	struct isl12020m_data *priv;
 	int initial_state;
 	int err;
-	u8 freq_out_mode = 0;
+	u32 freq_out_mode = 0;
 	bool freq_out_bat = false;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
@@ -572,11 +572,11 @@ static int isl12020m_probe(struct i2c_client *client)
 			 PTR_ERR(priv->hwmon_dev));
 	}
 
-	if (device_property_present(&client->dev, "temperature-sensor-enabled"))
+	if (device_property_present(&client->dev, "temperature-sensor-enable"))
 		isl12020m_set_beta(priv, true, priv->btse, priv->btsr);
-	if (device_property_present(&client->dev, "battery-temperature-sensor-enabled"))
+	if (device_property_present(&client->dev, "battery-temperature-sensor-enable"))
 		isl12020m_set_beta(priv, priv->tse, true, priv->btsr);
-	if (device_property_present(&client->dev, "high-sensing-frequency"))
+	if (device_property_present(&client->dev, "high-sensing-frequency-enable"))
 		isl12020m_set_beta(priv, priv->tse, priv->btse, true);
 
 	/*
@@ -586,7 +586,7 @@ static int isl12020m_probe(struct i2c_client *client)
 	 */
 	if (device_property_present(&client->dev, "battery-frequency-output-enable"))
 		freq_out_bat = true;
-	device_property_read_u8(&client->dev, "frequency-output-mode", &freq_out_mode);
+	device_property_read_u32(&client->dev, "frequency-output-mode", &freq_out_mode);
 	err = isl12020m_set_freq_out(priv, freq_out_mode, freq_out_bat);
 	if (err) {
 		dev_warn(&client->dev,
