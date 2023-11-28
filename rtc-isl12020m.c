@@ -288,15 +288,14 @@ static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *
 				   const char *buf, size_t count)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	int err = -EINVAL;
 	u8 val;
 
 	sscanf(buf, "%hhu", &val);
-	if (val)
-		isl12020m_set_beta(priv, true, priv->btse, priv->btsr);
-	else
-		isl12020m_set_beta(priv, false, priv->btse, priv->btsr);
+	if (val <= 1 && count > 0 && count <= 2)
+		err = isl12020m_set_beta(priv, val, priv->btse, priv->btsr);
 
-	return count;
+	return err == 0 ? count : err;
 }
 
 /* enable sensor usage and drift correction during normal power supply mode */
@@ -320,15 +319,14 @@ static ssize_t isl12020m_btse_store(struct device *dev, struct device_attribute 
 				    const char *buf, size_t count)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	int err = -EINVAL;
 	u8 val;
 
 	sscanf(buf, "%hhu", &val);
-	if (val)
-		isl12020m_set_beta(priv, priv->tse, true, priv->btsr);
-	else
-		isl12020m_set_beta(priv, priv->tse, false, priv->btsr);
+	if (val <= 1 && count > 0 && count <= 2)
+		err = isl12020m_set_beta(priv, priv->tse, val, priv->btsr);
 
-	return count;
+	return err == 0 ? count : err;
 }
 
 /* enable sensor usage and drift correction during battery mode */
@@ -352,15 +350,14 @@ static ssize_t isl12020m_btsr_store(struct device *dev, struct device_attribute 
 				    const char *buf, size_t count)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	int err = -EINVAL;
 	u8 val;
 
 	sscanf(buf, "%hhu", &val);
-	if (val)
-		isl12020m_set_beta(priv, priv->tse, priv->btse, true);
-	else
-		isl12020m_set_beta(priv, priv->tse, priv->btse, false);
+	if (val <= 1 && count > 0 && count <= 2)
+		err = isl12020m_set_beta(priv, priv->tse, priv->btse, val);
 
-	return count;
+	return err == 0 ? count : err;
 }
 
 /* switch sensing frequency from 10 minutes to 1 minute */
@@ -385,15 +382,14 @@ static ssize_t isl12020m_bat_freq_out_store(struct device *dev, struct device_at
 					    const char *buf, size_t count)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	int err = -EINVAL;
 	u8 val;
 
 	sscanf(buf, "%hhu", &val);
-	if (val)
-		isl12020m_set_freq_out(priv, priv->freq_out_mode, true);
-	else
-		isl12020m_set_freq_out(priv, priv->freq_out_mode, false);
+	if (val <= 1 && count > 0 && count <= 2)
+		err = isl12020m_set_freq_out(priv, priv->freq_out_mode, val);
 
-	return count;
+	return err == 0 ? count : err;
 }
 
 /* make battery frequency output feature runtime switchable */
@@ -418,13 +414,14 @@ static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attrib
 					const char *buf, size_t count)
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	int err = -EINVAL;
 	u16 val;
 
 	sscanf(buf, "%hu", &val);
-	if (val <= FREQ_OUT_MODE_MAX)
-		isl12020m_set_freq_out(priv, val, priv->freq_out_bat);
+	if (val <= FREQ_OUT_MODE_MAX && count > 0 && count <= 3)
+		err = isl12020m_set_freq_out(priv, val, priv->freq_out_bat);
 
-	return count;
+	return err == 0 ? count : err;
 }
 
 /* make frequency output feature runtime switchable (off and predefined frequencies */
