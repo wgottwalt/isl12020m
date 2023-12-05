@@ -75,18 +75,30 @@ static const char *const freq_out_modes[] = {
 	"1/16", "1/32",
 };
 
+struct isl12020m_status {
+	bool oscf;			/* oscillator failure */
+	bool rtcf;			/* rtc failure due low voltage or oscillator failure */
+	bool power_triggers_checked;	/* checking lvdd and lbat* only after setting TSE */
+	bool lvdd;			/* low voltage on normal power line */
+	bool lbat85;			/* low voltage on battery first trigger */
+	bool lbat75;			/* low voltage on battery second trigger */
+};
+
+struct isl12020m_config {
+	u8 freq_out_mode;
+	bool freq_out_bat;
+	bool tse;
+	bool btse;
+	bool btsr;
+};
+
 struct isl12020m_data {
 	struct i2c_client *client;
 	struct rtc_device *rtc;
 	struct regmap *regmap;
 	struct device *hwmon_dev;
-	u8 freq_out_mode;
-	bool freq_out_bat;
-	bool oscf;
-	bool rtcf;
-	bool tse;
-	bool btse;
-	bool btsr;
+	struct isl12020m_status status;
+	struct isl12020m_config config;
 };
 
 static int isl12020m_set_beta(struct isl12020m_data *priv, bool tse, bool btse, bool btsr)
@@ -102,9 +114,9 @@ static int isl12020m_set_beta(struct isl12020m_data *priv, bool tse, bool btse, 
 
 		err = regmap_write(priv->regmap, ISL_REG_CSR_BETA, val);
 		if (!err) {
-			priv->tse = tse;
-			priv->btse = btse;
-			priv->btsr = btsr;
+			priv->config.tse = tse;
+			priv->config.btse = btse;
+			priv->config.btsr = btsr;
 		} else {
 			dev_warn(&priv->client->dev, "BETA register writing failed (%d)\n", err);
 		}
@@ -115,7 +127,7 @@ static int isl12020m_set_beta(struct isl12020m_data *priv, bool tse, bool btse, 
 	return err;
 }
 
-static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool enable_bat)
+static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool batmode)
 {
 	int val;
 	int err;
@@ -123,14 +135,14 @@ static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool ena
 	err = regmap_read(priv->regmap, ISL_REG_CSR_INT, &val);
 	if (!err) {
 		/* ISL_BIT_CSR_INT_FOBATB flag is a reversed bit */
-		val = enable_bat ? (val & ~ISL_BIT_CSR_INT_FOBATB) : (val | ISL_BIT_CSR_INT_FOBATB);
+		val = batmode ? (val & ~ISL_BIT_CSR_INT_FOBATB) : (val | ISL_BIT_CSR_INT_FOBATB);
 		val &= ~MASK4BITS;
 		val |= mode & MASK4BITS;
 
 		err = regmap_write(priv->regmap, ISL_REG_CSR_INT, val);
 		if (!err) {
-			priv->freq_out_mode = mode;
-			priv->freq_out_bat = enable_bat;
+			priv->config.freq_out_mode = mode;
+			priv->config.freq_out_bat = batmode;
 		} else {
 			dev_warn(&priv->client->dev, "INT register writing failed (%d)\n", err);
 		}
@@ -146,8 +158,12 @@ static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 	int err = -EOPNOTSUPP;
 	__le16 buf;
 
-	/* if BETA TSE is disabled, sensor values are bogus values -> disable temp1_input */
-	if (priv->tse) {
+	/*
+	 * if BETA TSE is disabled, sensor values may be not valid -> disable temp1_input
+	 * isl12020m: (ISL_REG_TEMP_TKOL<0:7> + ISL_REG_TEMP_TKOM<0:1>) / 2 - 273 (range 446 - 726)
+	 * isl12020: (ISL_REG_TEMP_TKOL<0:7> + ISL_REG_TEMP_TKOM<0:1>) / 2 - 369 (range 658 - 908)
+	 */
+	if (priv->config.tse) {
 		err = regmap_bulk_read(priv->regmap, ISL_REG_TEMP_TKOL, &buf, sizeof(buf));
 		if (err == 0) {
 			*val = le16_to_cpu(buf);
@@ -250,7 +266,7 @@ static ssize_t isl12020m_oscf_show(struct device *dev, struct device_attribute *
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%c\n", priv->oscf ? '1' : '0');
+	return sysfs_emit(buf, "%c\n", priv->status.oscf ? '1' : '0');
 }
 
 /* store oscillator failure for userspace checks */
@@ -266,7 +282,7 @@ static ssize_t isl12020m_rtcf_show(struct device *dev, struct device_attribute *
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%c\n", priv->rtcf ? '1' : '0');
+	return sysfs_emit(buf, "%c\n", priv->status.rtcf ? '1' : '0');
 }
 
 /* store rtc failure for userspace checks */
@@ -282,7 +298,7 @@ static ssize_t isl12020m_tse_show(struct device *dev, struct device_attribute *a
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%c\n", priv->tse ? '1' : '0');
+	return sysfs_emit(buf, "%c\n", priv->config.tse ? '1' : '0');
 }
 
 static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *attr,
@@ -294,7 +310,7 @@ static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *
 
 	err = kstrtobool(buf, &val);
 	if (!err)
-		err = isl12020m_set_beta(priv, val, priv->btse, priv->btsr);
+		err = isl12020m_set_beta(priv, val, priv->config.btse, priv->config.btsr);
 
 	return err ? err : count;
 }
@@ -313,7 +329,7 @@ static ssize_t isl12020m_btse_show(struct device *dev, struct device_attribute *
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%c\n", priv->btse ? '1' : '0');
+	return sysfs_emit(buf, "%c\n", priv->config.btse ? '1' : '0');
 }
 
 static ssize_t isl12020m_btse_store(struct device *dev, struct device_attribute *attr,
@@ -325,7 +341,7 @@ static ssize_t isl12020m_btse_store(struct device *dev, struct device_attribute 
 
 	err = kstrtobool(buf, &val);
 	if (!err)
-		err = isl12020m_set_beta(priv, priv->tse, val, priv->btsr);
+		err = isl12020m_set_beta(priv, priv->config.tse, val, priv->config.btsr);
 
 	return err ? err : count;
 }
@@ -344,7 +360,7 @@ static ssize_t isl12020m_btsr_show(struct device *dev, struct device_attribute *
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%c\n", priv->btsr ? '1' : '0');
+	return sysfs_emit(buf, "%c\n", priv->config.btsr ? '1' : '0');
 }
 
 static ssize_t isl12020m_btsr_store(struct device *dev, struct device_attribute *attr,
@@ -356,7 +372,7 @@ static ssize_t isl12020m_btsr_store(struct device *dev, struct device_attribute 
 
 	err = kstrtobool(buf, &val);
 	if (!err)
-		err = isl12020m_set_beta(priv, priv->tse, priv->btse, val);
+		err = isl12020m_set_beta(priv, priv->config.tse, priv->config.btse, val);
 
 	return err ? err : count;
 }
@@ -376,7 +392,7 @@ static ssize_t isl12020m_bat_freq_out_show(struct device *dev, struct device_att
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%c\n", priv->freq_out_bat ? '1' : '0');
+	return sysfs_emit(buf, "%c\n", priv->config.freq_out_bat ? '1' : '0');
 }
 
 static ssize_t isl12020m_bat_freq_out_store(struct device *dev, struct device_attribute *attr,
@@ -388,7 +404,7 @@ static ssize_t isl12020m_bat_freq_out_store(struct device *dev, struct device_at
 
 	err = kstrtobool(buf, &val);
 	if (!err)
-		err = isl12020m_set_freq_out(priv, priv->freq_out_mode, val);
+		err = isl12020m_set_freq_out(priv, priv->config.freq_out_mode, val);
 
 	return err ? err : val;
 }
@@ -407,8 +423,9 @@ static ssize_t isl12020m_freq_out_show(struct device *dev, struct device_attribu
 {
 	struct isl12020m_data *priv = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%d (%s%s)\n", priv->freq_out_mode,
-			  freq_out_modes[priv->freq_out_mode], priv->freq_out_mode ? " Hz" : "");
+	return sysfs_emit(buf, "%d (%s%s)\n", priv->config.freq_out_mode,
+			  freq_out_modes[priv->config.freq_out_mode], priv->config.freq_out_mode ?
+			  " Hz" : "");
 }
 
 static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attribute *attr,
@@ -421,7 +438,7 @@ static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attrib
 	err = kstrtou8(buf, 10, &val);
 	if (!err) {
 		if (val <= FREQ_OUT_MODE_MAX)
-			err = isl12020m_set_freq_out(priv, val, priv->freq_out_bat);
+			err = isl12020m_set_freq_out(priv, val, priv->config.freq_out_bat);
 		else
 			err = -ERANGE;
 	}
@@ -556,11 +573,11 @@ static int isl12020m_probe(struct i2c_client *client)
 		goto state_fail;
 	}
 	if (initial_state & ISL_BIT_CSR_SR_OSCF) {
-		priv->oscf = true;
+		priv->status.oscf = true;
 		dev_warn(&client->dev, "oscillator failure detected\n");
 	}
 	if (initial_state & ISL_BIT_CSR_SR_RTCF) {
-		priv->rtcf = true;
+		priv->status.rtcf = true;
 		dev_warn(&client->dev, "RTC power failure detected\n");
 	}
 
@@ -573,11 +590,11 @@ static int isl12020m_probe(struct i2c_client *client)
 	}
 
 	if (device_property_present(&client->dev, "temperature-sensor-enable"))
-		isl12020m_set_beta(priv, true, priv->btse, priv->btsr);
+		isl12020m_set_beta(priv, true, priv->config.btse, priv->config.btsr);
 	if (device_property_present(&client->dev, "battery-temperature-sensor-enable"))
-		isl12020m_set_beta(priv, priv->tse, true, priv->btsr);
+		isl12020m_set_beta(priv, priv->config.tse, true, priv->config.btsr);
 	if (device_property_present(&client->dev, "high-sensing-frequency-enable"))
-		isl12020m_set_beta(priv, priv->tse, priv->btse, true);
+		isl12020m_set_beta(priv, priv->config.tse, priv->config.btse, true);
 
 	/*
 	 * failure of setting the frequency output support is not critical
@@ -612,13 +629,16 @@ static void isl12020m_remove(struct i2c_client *client)
 
 static const struct of_device_id isl12020m_of_match_table[] = {
 	{ .compatible = "renesas,isl12020m" },
+	{ .compatible = "renesas,isl12020" },
 	{ .compatible = "isil,isl12020m" },
+	{ .compatible = "isil,isl12020" },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, isl12020m_of_match_table);
 
 static const struct i2c_device_id isl12020m_id[] = {
 	{ "isl12020mirz", 0 },
+	{ "isl12020cbz", 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(i2c, isl12020m_id);
