@@ -33,11 +33,16 @@
 #define MONTH_OFFSET		1
 
 #define MILLI_DEGREE_CELCIUS	1000
-#define CELCIUS0		(273 * MILLI_DEGREE_CELCIUS)
-#define TEMP_MIN		(-40 * MILLI_DEGREE_CELCIUS)
-#define TEMP_LCRIT		(-50 * MILLI_DEGREE_CELCIUS)
-#define TEMP_MAX		(85 * MILLI_DEGREE_CELCIUS)
-#define TEMP_CRIT		(90 * MILLI_DEGREE_CELCIUS)
+#define CELCIUS0		(369 * MILLI_DEGREE_CELCIUS)
+#define CELCIUS0_M		(273 * MILLI_DEGREE_CELCIUS)
+#define TEMP_MIN		(-20 * MILLI_DEGREE_CELCIUS)
+#define TEMP_MIN_M		(-40 * MILLI_DEGREE_CELCIUS)
+#define TEMP_LCRIT		(-40 * MILLI_DEGREE_CELCIUS)
+#define TEMP_LCRIT_M		(-50 * MILLI_DEGREE_CELCIUS)
+#define TEMP_MAX		(75 * MILLI_DEGREE_CELCIUS)
+#define TEMP_MAX_M		(85 * MILLI_DEGREE_CELCIUS)
+#define TEMP_CRIT		(85 * MILLI_DEGREE_CELCIUS)
+#define TEMP_CRIT_M		(90 * MILLI_DEGREE_CELCIUS)
 
 #define FREQ_OUT_MODE_MAX	GENMASK(3, 0)
 
@@ -168,7 +173,7 @@ static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 		if (err == 0) {
 			*val = le16_to_cpu(buf);
 			*val *= MILLI_DEGREE_CELCIUS / 2;
-			*val -= CELCIUS0;
+			*val -= CELCIUS0_M;
 		}
 	}
 
@@ -205,16 +210,16 @@ static int isl12020m_hwmon_temp_read(struct isl12020m_data *priv, u32 attr, int 
 		err = isl12020m_read_temp(priv, val);
 		break;
 	case hwmon_temp_lcrit:
-		*val = TEMP_LCRIT;
+		*val = TEMP_LCRIT_M;
 		break;
 	case hwmon_temp_min:
-		*val = TEMP_MIN;
+		*val = TEMP_MIN_M;
 		break;
 	case hwmon_temp_max:
-		*val = TEMP_MAX;
+		*val = TEMP_MAX_M;
 		break;
 	case hwmon_temp_crit:
-		*val = TEMP_CRIT;
+		*val = TEMP_CRIT_M;
 		break;
 	default:
 		err = -EOPNOTSUPP;
