@@ -1,5 +1,5 @@
 ccflags-y = -DEXPORT_SYMTAB
-obj-m := rtc-isl12020m.o
+obj-m := rtc-isl12020.o
 
 KDIR = /lib/modules/$(shell uname -r)/build/
 PWD = $(shell pwd)
