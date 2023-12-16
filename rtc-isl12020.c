@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * rtc-isl12020m - Renesas ISL12020M RTC I2C driver
+ * rtc-isl12020 - Renesas ISL12020M RTC I2C driver
  * Copyright (C) 2023 Wilken Gottwalt <wilken.gottwalt@posteo.net>
  */
 
@@ -20,7 +20,7 @@
 #include <linux/sysfs.h>
 #include <linux/types.h>
 
-#define INTERNAL_NAME		"isl12020m"
+#define INTERNAL_NAME		"isl12020"
 #define DRIVER_NAME		"rtc-" INTERNAL_NAME
 
 #define MASK3BITS		GENMASK(2, 0)
@@ -80,7 +80,7 @@ static const char *const freq_out_modes[] = {
 	"1/16", "1/32",
 };
 
-struct isl12020m_status {
+struct isl12020_status {
 	bool oscf;			/* oscillator failure */
 	bool rtcf;			/* rtc failure due low voltage or oscillator failure */
 	bool power_triggers_checked;	/* checking lvdd and lbat* only after setting TSE */
@@ -89,7 +89,7 @@ struct isl12020m_status {
 	bool lbat75;			/* low voltage on battery second trigger */
 };
 
-struct isl12020m_config {
+struct isl12020_config {
 	u8 freq_out_mode;
 	bool freq_out_bat;
 	bool tse;
@@ -97,16 +97,16 @@ struct isl12020m_config {
 	bool btsr;
 };
 
-struct isl12020m_data {
+struct isl12020_data {
 	struct i2c_client *client;
 	struct rtc_device *rtc;
 	struct regmap *regmap;
 	struct device *hwmon_dev;
-	struct isl12020m_status status;
-	struct isl12020m_config config;
+	struct isl12020_status status;
+	struct isl12020_config config;
 };
 
-static int isl12020m_set_beta(struct isl12020m_data *priv, bool tse, bool btse, bool btsr)
+static int isl12020_set_beta(struct isl12020_data *priv, bool tse, bool btse, bool btsr)
 {
 	int val;
 	int err;
@@ -132,7 +132,7 @@ static int isl12020m_set_beta(struct isl12020m_data *priv, bool tse, bool btse, 
 	return err;
 }
 
-static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool batmode)
+static int isl12020_set_freq_out(struct isl12020_data *priv, u8 mode, bool batmode)
 {
 	int val;
 	int err;
@@ -158,14 +158,14 @@ static int isl12020m_set_freq_out(struct isl12020m_data *priv, u8 mode, bool bat
 	return err;
 }
 
-static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
+static int isl12020_read_temp(struct isl12020_data *priv, long *val)
 {
 	int err = -EOPNOTSUPP;
 	__le16 buf;
 
 	/*
 	 * if BETA TSE is disabled, sensor values may be not valid -> disable temp1_input
-	 * isl12020m: (ISL_REG_TEMP_TKOL<0:7> + ISL_REG_TEMP_TKOM<0:1>) / 2 - 273 (range 446 - 726)
+	 * isl12020: (ISL_REG_TEMP_TKOL<0:7> + ISL_REG_TEMP_TKOM<0:1>) / 2 - 273 (range 446 - 726)
 	 * isl12020: (ISL_REG_TEMP_TKOL<0:7> + ISL_REG_TEMP_TKOM<0:1>) / 2 - 369 (range 658 - 908)
 	 */
 	if (priv->config.tse) {
@@ -180,8 +180,8 @@ static int isl12020m_read_temp(struct isl12020m_data *priv, long *val)
 	return err;
 }
 
-static umode_t isl12020m_hwmon_temp_is_visible(const struct isl12020m_data *priv, u32 attr,
-					       int channel)
+static umode_t isl12020_hwmon_temp_is_visible(const struct isl12020_data *priv, u32 attr,
+					      int channel)
 {
 	umode_t err = 0444;
 
@@ -201,13 +201,13 @@ static umode_t isl12020m_hwmon_temp_is_visible(const struct isl12020m_data *priv
 	return err;
 }
 
-static int isl12020m_hwmon_temp_read(struct isl12020m_data *priv, u32 attr, int channel, long *val)
+static int isl12020_hwmon_temp_read(struct isl12020_data *priv, u32 attr, int channel, long *val)
 {
 	int err = 0;
 
 	switch (attr) {
 	case hwmon_temp_input:
-		err = isl12020m_read_temp(priv, val);
+		err = isl12020_read_temp(priv, val);
 		break;
 	case hwmon_temp_lcrit:
 		*val = TEMP_LCRIT_M;
@@ -228,222 +228,222 @@ static int isl12020m_hwmon_temp_read(struct isl12020m_data *priv, u32 attr, int 
 	return err;
 }
 
-static umode_t isl12020m_hwmon_ops_is_visible(const void *data, enum hwmon_sensor_types type,
-					      u32 attr, int channel)
+static umode_t isl12020_hwmon_ops_is_visible(const void *data, enum hwmon_sensor_types type,
+					     u32 attr, int channel)
 {
-	const struct isl12020m_data *priv = data;
+	const struct isl12020_data *priv = data;
 
 	if (type == hwmon_temp)
-		return isl12020m_hwmon_temp_is_visible(priv, attr, channel);
+		return isl12020_hwmon_temp_is_visible(priv, attr, channel);
 
 	return 0;
 }
 
-static int isl12020m_hwmon_ops_read(struct device *dev, enum hwmon_sensor_types type, u32 attr,
-				    int channel, long *val)
+static int isl12020_hwmon_ops_read(struct device *dev, enum hwmon_sensor_types type, u32 attr,
+				   int channel, long *val)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 
 	if (type == hwmon_temp)
-		return isl12020m_hwmon_temp_read(priv, attr, channel, val);
+		return isl12020_hwmon_temp_read(priv, attr, channel, val);
 
 	return -EOPNOTSUPP;
 }
 
-static const struct hwmon_ops isl12020m_hwmon_ops = {
-	.is_visible = isl12020m_hwmon_ops_is_visible,
-	.read = isl12020m_hwmon_ops_read,
+static const struct hwmon_ops isl12020_hwmon_ops = {
+	.is_visible = isl12020_hwmon_ops_is_visible,
+	.read = isl12020_hwmon_ops_read,
 };
 
-static const struct hwmon_channel_info *isl12020m_info[] = {
+static const struct hwmon_channel_info *isl12020_info[] = {
 	HWMON_CHANNEL_INFO(temp,
 			   HWMON_T_INPUT | HWMON_T_LCRIT | HWMON_T_MIN | HWMON_T_MAX |
 			   HWMON_T_CRIT),
 	NULL,
 };
 
-static const struct hwmon_chip_info isl12020m_chip_info = {
-	.ops = &isl12020m_hwmon_ops,
-	.info = isl12020m_info,
+static const struct hwmon_chip_info isl12020_chip_info = {
+	.ops = &isl12020_hwmon_ops,
+	.info = isl12020_info,
 };
 
-static ssize_t isl12020m_oscf_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t isl12020_oscf_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 
 	return sysfs_emit(buf, "%c\n", priv->status.oscf ? '1' : '0');
 }
 
 /* store oscillator failure for userspace checks */
-static struct device_attribute isl12020m_oscf_dev_attr = {
+static struct device_attribute isl12020_oscf_dev_attr = {
 	.attr = {
 		.name = "oscillator_failed",
 		.mode = 0444,
 	},
-	.show = isl12020m_oscf_show,
+	.show = isl12020_oscf_show,
 };
 
-static ssize_t isl12020m_rtcf_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t isl12020_rtcf_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 
 	return sysfs_emit(buf, "%c\n", priv->status.rtcf ? '1' : '0');
 }
 
 /* store rtc failure for userspace checks */
-static struct device_attribute isl12020m_rtcf_dev_attr = {
+static struct device_attribute isl12020_rtcf_dev_attr = {
 	.attr = {
 		.name = "rtc_failed",
 		.mode = 0444,
 	},
-	.show = isl12020m_rtcf_show,
+	.show = isl12020_rtcf_show,
 };
 
-static ssize_t isl12020m_tse_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t isl12020_tse_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 
 	return sysfs_emit(buf, "%c\n", priv->config.tse ? '1' : '0');
 }
 
-static ssize_t isl12020m_tse_store(struct device *dev, struct device_attribute *attr,
-				   const char *buf, size_t count)
+static ssize_t isl12020_tse_store(struct device *dev, struct device_attribute *attr,
+				  const char *buf, size_t count)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 	int err;
 	bool val;
 
 	err = kstrtobool(buf, &val);
 	if (!err)
-		err = isl12020m_set_beta(priv, val, priv->config.btse, priv->config.btsr);
+		err = isl12020_set_beta(priv, val, priv->config.btse, priv->config.btsr);
 
 	return err ? err : count;
 }
 
 /* enable sensor usage and drift correction during normal power supply mode */
-static struct device_attribute isl12020m_tse_dev_attr = {
+static struct device_attribute isl12020_tse_dev_attr = {
 	.attr = {
 		.name = "temperature_sensor_enabled",
 		.mode = 0644,
 	},
-	.show = isl12020m_tse_show,
-	.store = isl12020m_tse_store,
+	.show = isl12020_tse_show,
+	.store = isl12020_tse_store,
 };
 
-static ssize_t isl12020m_btse_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t isl12020_btse_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 
 	return sysfs_emit(buf, "%c\n", priv->config.btse ? '1' : '0');
 }
 
-static ssize_t isl12020m_btse_store(struct device *dev, struct device_attribute *attr,
-				    const char *buf, size_t count)
+static ssize_t isl12020_btse_store(struct device *dev, struct device_attribute *attr,
+				   const char *buf, size_t count)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 	int err;
 	bool val;
 
 	err = kstrtobool(buf, &val);
 	if (!err)
-		err = isl12020m_set_beta(priv, priv->config.tse, val, priv->config.btsr);
+		err = isl12020_set_beta(priv, priv->config.tse, val, priv->config.btsr);
 
 	return err ? err : count;
 }
 
 /* enable sensor usage and drift correction during battery mode */
-static struct device_attribute isl12020m_btse_dev_attr = {
+static struct device_attribute isl12020_btse_dev_attr = {
 	.attr = {
 		.name = "battery_temperature_sensor_enabled",
 		.mode = 0644,
 	},
-	.show = isl12020m_btse_show,
-	.store = isl12020m_btse_store,
+	.show = isl12020_btse_show,
+	.store = isl12020_btse_store,
 };
 
-static ssize_t isl12020m_btsr_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t isl12020_btsr_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 
 	return sysfs_emit(buf, "%c\n", priv->config.btsr ? '1' : '0');
 }
 
-static ssize_t isl12020m_btsr_store(struct device *dev, struct device_attribute *attr,
-				    const char *buf, size_t count)
+static ssize_t isl12020_btsr_store(struct device *dev, struct device_attribute *attr,
+				   const char *buf, size_t count)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 	int err;
 	bool val;
 
 	err = kstrtobool(buf, &val);
 	if (!err)
-		err = isl12020m_set_beta(priv, priv->config.tse, priv->config.btse, val);
+		err = isl12020_set_beta(priv, priv->config.tse, priv->config.btse, val);
 
 	return err ? err : count;
 }
 
 /* switch sensing frequency from 10 minutes to 1 minute */
-static struct device_attribute isl12020m_btsr_dev_attr = {
+static struct device_attribute isl12020_btsr_dev_attr = {
 	.attr = {
 		.name = "high_sensing_frequency",
 		.mode = 0644,
 	},
-	.show = isl12020m_btsr_show,
-	.store = isl12020m_btsr_store,
+	.show = isl12020_btsr_show,
+	.store = isl12020_btsr_store,
 };
 
-static ssize_t isl12020m_bat_freq_out_show(struct device *dev, struct device_attribute *attr,
-					   char *buf)
+static ssize_t isl12020_bat_freq_out_show(struct device *dev, struct device_attribute *attr,
+					  char *buf)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 
 	return sysfs_emit(buf, "%c\n", priv->config.freq_out_bat ? '1' : '0');
 }
 
-static ssize_t isl12020m_bat_freq_out_store(struct device *dev, struct device_attribute *attr,
-					    const char *buf, size_t count)
+static ssize_t isl12020_bat_freq_out_store(struct device *dev, struct device_attribute *attr,
+					   const char *buf, size_t count)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 	int err;
 	bool val;
 
 	err = kstrtobool(buf, &val);
 	if (!err)
-		err = isl12020m_set_freq_out(priv, priv->config.freq_out_mode, val);
+		err = isl12020_set_freq_out(priv, priv->config.freq_out_mode, val);
 
 	return err ? err : val;
 }
 
 /* make battery frequency output feature runtime switchable */
-static struct device_attribute isl12020m_bat_freq_out_dev_attr = {
+static struct device_attribute isl12020_bat_freq_out_dev_attr = {
 	.attr = {
 		.name = "battery_frequency_output_enabled",
 		.mode = 0644,
 	},
-	.show = isl12020m_bat_freq_out_show,
-	.store = isl12020m_bat_freq_out_store,
+	.show = isl12020_bat_freq_out_show,
+	.store = isl12020_bat_freq_out_store,
 };
 
-static ssize_t isl12020m_freq_out_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t isl12020_freq_out_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 
 	return sysfs_emit(buf, "%d (%s%s)\n", priv->config.freq_out_mode,
 			  freq_out_modes[priv->config.freq_out_mode], priv->config.freq_out_mode ?
 			  " Hz" : "");
 }
 
-static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attribute *attr,
-					const char *buf, size_t count)
+static ssize_t isl12020_freq_out_store(struct device *dev, struct device_attribute *attr,
+				       const char *buf, size_t count)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 	int err;
 	u8 val;
 
 	err = kstrtou8(buf, 10, &val);
 	if (!err) {
 		if (val <= FREQ_OUT_MODE_MAX)
-			err = isl12020m_set_freq_out(priv, val, priv->config.freq_out_bat);
+			err = isl12020_set_freq_out(priv, val, priv->config.freq_out_bat);
 		else
 			err = -ERANGE;
 	}
@@ -452,29 +452,29 @@ static ssize_t isl12020m_freq_out_store(struct device *dev, struct device_attrib
 }
 
 /* make frequency output feature runtime switchable (off or predefined frequencies */
-static struct device_attribute isl12020m_freq_out_dev_attr = {
+static struct device_attribute isl12020_freq_out_dev_attr = {
 	.attr = {
 		.name = "frequency_output",
 		.mode = 0644,
 	},
-	.show = isl12020m_freq_out_show,
-	.store = isl12020m_freq_out_store,
+	.show = isl12020_freq_out_show,
+	.store = isl12020_freq_out_store,
 };
 
-static const struct attribute *isl12020m_attrs[] = {
-	&isl12020m_oscf_dev_attr.attr,
-	&isl12020m_rtcf_dev_attr.attr,
-	&isl12020m_tse_dev_attr.attr,
-	&isl12020m_btse_dev_attr.attr,
-	&isl12020m_btsr_dev_attr.attr,
-	&isl12020m_bat_freq_out_dev_attr.attr,
-	&isl12020m_freq_out_dev_attr.attr,
+static const struct attribute *isl12020_attrs[] = {
+	&isl12020_oscf_dev_attr.attr,
+	&isl12020_rtcf_dev_attr.attr,
+	&isl12020_tse_dev_attr.attr,
+	&isl12020_btse_dev_attr.attr,
+	&isl12020_btsr_dev_attr.attr,
+	&isl12020_bat_freq_out_dev_attr.attr,
+	&isl12020_freq_out_dev_attr.attr,
 	NULL,
 };
 
-static int isl12020m_rtc_ops_read_time(struct device *dev, struct rtc_time *tm)
+static int isl12020_rtc_ops_read_time(struct device *dev, struct rtc_time *tm)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 	struct regmap *regmap = priv->regmap;
 	u8 regmap_buf[ISL_REG_CSR_INT + 1];
 	int err;
@@ -494,9 +494,9 @@ static int isl12020m_rtc_ops_read_time(struct device *dev, struct rtc_time *tm)
 	return 0;
 }
 
-static int isl12020m_rtc_ops_set_time(struct device *dev, struct rtc_time *tm)
+static int isl12020_rtc_ops_set_time(struct device *dev, struct rtc_time *tm)
 {
-	struct isl12020m_data *priv = dev_get_drvdata(dev);
+	struct isl12020_data *priv = dev_get_drvdata(dev);
 	struct regmap *regmap = priv->regmap;
 	u8 regmap_buf[ISL_REG_RTC_DW + 1];
 	int err;
@@ -517,20 +517,20 @@ static int isl12020m_rtc_ops_set_time(struct device *dev, struct rtc_time *tm)
 	return regmap_bulk_write(priv->regmap, ISL_REG_RTC_SC, regmap_buf, sizeof(regmap_buf));
 }
 
-static const struct rtc_class_ops isl12020m_rtc_ops = {
-	.read_time = isl12020m_rtc_ops_read_time,
-	.set_time = isl12020m_rtc_ops_set_time,
+static const struct rtc_class_ops isl12020_rtc_ops = {
+	.read_time = isl12020_rtc_ops_read_time,
+	.set_time = isl12020_rtc_ops_set_time,
 };
 
-static const struct regmap_config isl12020m_regmap_config = {
+static const struct regmap_config isl12020_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
 	.use_single_write = true,
 };
 
-static int isl12020m_probe(struct i2c_client *client)
+static int isl12020_probe(struct i2c_client *client)
 {
-	struct isl12020m_data *priv;
+	struct isl12020_data *priv;
 	int initial_state;
 	int err;
 	u32 freq_out_mode = 0;
@@ -539,14 +539,14 @@ static int isl12020m_probe(struct i2c_client *client)
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
 		return -ENODEV;
 
-	priv = devm_kzalloc(&client->dev, sizeof(struct isl12020m_data), GFP_KERNEL);
+	priv = devm_kzalloc(&client->dev, sizeof(struct isl12020_data), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
 	priv->client = client;
 	dev_set_drvdata(&client->dev, priv);
 
-	priv->regmap = devm_regmap_init_i2c(client, &isl12020m_regmap_config);
+	priv->regmap = devm_regmap_init_i2c(client, &isl12020_regmap_config);
 	if (IS_ERR(priv->regmap)) {
 		err = PTR_ERR(priv->regmap);
 		dev_err(&client->dev, "allocating regmap failed (%d)\n", err);
@@ -560,12 +560,12 @@ static int isl12020m_probe(struct i2c_client *client)
 		return err;
 	}
 
-	priv->rtc->ops = &isl12020m_rtc_ops;
+	priv->rtc->ops = &isl12020_rtc_ops;
 	priv->rtc->range_min = RTC_TIMESTAMP_BEGIN_2000;
 	priv->rtc->range_max = RTC_TIMESTAMP_END_2099;
 
 	/* sysfs is required and should not fail */
-	err = sysfs_create_files(&client->dev.kobj, isl12020m_attrs);
+	err = sysfs_create_files(&client->dev.kobj, isl12020_attrs);
 	if (err) {
 		pr_err("failed to create sysfs entries (%d)\n", err);
 		goto sysfs_fail;
@@ -588,18 +588,18 @@ static int isl12020m_probe(struct i2c_client *client)
 
 	/* setup of hwmon failing is not critical */
 	priv->hwmon_dev = hwmon_device_register_with_info(&client->dev, INTERNAL_NAME, priv,
-							  &isl12020m_chip_info, NULL);
+							  &isl12020_chip_info, NULL);
 	if (IS_ERR(priv->hwmon_dev)) {
 		dev_warn(&client->dev, "registering hwmon device failed (%ld)\n",
 			 PTR_ERR(priv->hwmon_dev));
 	}
 
 	if (device_property_present(&client->dev, "temperature-sensor-enable"))
-		isl12020m_set_beta(priv, true, priv->config.btse, priv->config.btsr);
+		isl12020_set_beta(priv, true, priv->config.btse, priv->config.btsr);
 	if (device_property_present(&client->dev, "battery-temperature-sensor-enable"))
-		isl12020m_set_beta(priv, priv->config.tse, true, priv->config.btsr);
+		isl12020_set_beta(priv, priv->config.tse, true, priv->config.btsr);
 	if (device_property_present(&client->dev, "high-sensing-frequency-enable"))
-		isl12020m_set_beta(priv, priv->config.tse, priv->config.btse, true);
+		isl12020_set_beta(priv, priv->config.tse, priv->config.btse, true);
 
 	/*
 	 * failure of setting the frequency output support is not critical
@@ -609,7 +609,7 @@ static int isl12020m_probe(struct i2c_client *client)
 	if (device_property_present(&client->dev, "battery-frequency-output-enable"))
 		freq_out_bat = true;
 	device_property_read_u32(&client->dev, "frequency-output-mode", &freq_out_mode);
-	err = isl12020m_set_freq_out(priv, freq_out_mode, freq_out_bat);
+	err = isl12020_set_freq_out(priv, freq_out_mode, freq_out_bat);
 	if (err) {
 		dev_warn(&client->dev,
 			 "setting frequency output failed (battery mode=%d, mode=%d, err=%d)\n",
@@ -619,45 +619,45 @@ static int isl12020m_probe(struct i2c_client *client)
 	return devm_rtc_register_device(priv->rtc);
 
 state_fail:
-	sysfs_remove_files(&client->dev.kobj, isl12020m_attrs);
+	sysfs_remove_files(&client->dev.kobj, isl12020_attrs);
 sysfs_fail:
 	return err;
 }
 
-static void isl12020m_remove(struct i2c_client *client)
+static void isl12020_remove(struct i2c_client *client)
 {
-	struct isl12020m_data *priv = i2c_get_clientdata(client);
+	struct isl12020_data *priv = i2c_get_clientdata(client);
 
-	sysfs_remove_files(&client->dev.kobj, isl12020m_attrs);
+	sysfs_remove_files(&client->dev.kobj, isl12020_attrs);
 	hwmon_device_unregister(priv->hwmon_dev);
 }
 
-static const struct of_device_id isl12020m_of_match_table[] = {
-	{ .compatible = "renesas,isl12020m" },
+static const struct of_device_id isl12020_of_match_table[] = {
 	{ .compatible = "renesas,isl12020" },
-	{ .compatible = "isil,isl12020m" },
+	{ .compatible = "renesas,isl12020" },
+	{ .compatible = "isil,isl12020" },
 	{ .compatible = "isil,isl12020" },
 	{ },
 };
-MODULE_DEVICE_TABLE(of, isl12020m_of_match_table);
+MODULE_DEVICE_TABLE(of, isl12020_of_match_table);
 
-static const struct i2c_device_id isl12020m_id[] = {
-	{ "isl12020mirz", 0 },
+static const struct i2c_device_id isl12020_id[] = {
+	{ "isl12020irz", 0 },
 	{ "isl12020cbz", 0 },
 	{ },
 };
-MODULE_DEVICE_TABLE(i2c, isl12020m_id);
+MODULE_DEVICE_TABLE(i2c, isl12020_id);
 
-static struct i2c_driver isl12020m_driver = {
+static struct i2c_driver isl12020_driver = {
 	.driver	= {
 		.name = DRIVER_NAME,
-		.of_match_table = isl12020m_of_match_table,
+		.of_match_table = isl12020_of_match_table,
 	},
-	.probe = isl12020m_probe,
-	.remove = isl12020m_remove,
-	.id_table = isl12020m_id,
+	.probe = isl12020_probe,
+	.remove = isl12020_remove,
+	.id_table = isl12020_id,
 };
-module_i2c_driver(isl12020m_driver);
+module_i2c_driver(isl12020_driver);
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Wilken Gottwalt <wilken.gottwalt@posteo.net>");
