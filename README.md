@@ -1,7 +1,7 @@
-This is the main development repository for the rtc-isl12020m i2c driver. It
+This is the main development repository for the rtc-isl12020 i2c driver. It
 will be pushed upstream when ready.
 
-This driver supports the Renesas ISL12020M(IRZ) chip, which has some additional
+This driver supports the Renesas ISL12020(M) chips, which has some additional
 features important for high precission and high reliability scenarios.
 
 This driver is made for the new I2C API, which started with kernel 6.3. You can
